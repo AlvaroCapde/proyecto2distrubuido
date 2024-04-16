@@ -44,9 +44,9 @@ void aborta_handler(int sig){
 int main(){
 
 	int client1,client2;
-	char usernameOne[] = "player1";
+	char usernameOne[] = "user1";
 	char passwordOne[] = "password1";
-	char usernameTwo[] = "player2";
+	char usernameTwo[] = "user2";
 	char passwordTwo[] = "password2";
 
 	
