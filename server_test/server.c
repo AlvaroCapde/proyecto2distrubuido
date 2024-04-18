@@ -18,7 +18,7 @@
 struct Client {
     int socket;
 };
-struct Client clients[MAX_USERS];
+struct Client *clients[MAX_USERS];
 int num_clients = 0;
 struct User {
     char username[MAX_USERNAME_LENGTH];
@@ -35,18 +35,18 @@ void send_message(const char *message, const char *username) {
     fflush(stdout);
     
     for (int i = 0; i < num_clients; i++){
-        if (send(clients[i].socket, message, strlen(message), 0) == -1) {
+        if (send(clients[i]->socket, message, strlen(message), 0) == -1) {
             perror("Send failed");
             exit(EXIT_FAILURE);
         }
-        printf("Message succesfully sent to socket %d, client_index: %d\n",clients[i].socket,i);
+        printf("Message succesfully sent to socket %d, client_index: %d\n",clients[i]->socket,i);
     }
     printf("Message succesfully broadcasted to all active clients.\n");
     fflush(stdout);
 }
 
 void handle_client(int client_index) {
-    int client_socket = clients[client_index].socket;
+    int client_socket = clients[client_index]->socket;
     char buffer[BUFFER_SIZE] = {0};
     int bytes_received;
     char *auth_username;
@@ -189,7 +189,11 @@ int main() {
         int client_index;
         // Add client to list of clients
         if (num_clients < MAX_USERS) {
-            clients[num_clients].socket = client_socket;
+            clients[num_clients] = malloc(sizeof(struct Client));
+            if (clients[num_clients] == NULL) {
+                perror("Memory allocation failed");
+                exit(EXIT_FAILURE);
+            }            clients[num_clients]->socket = client_socket;
             client_index = num_clients;
             num_clients++;
             printf("Client socket %d added to list for client %d\n", client_socket, client_index);
