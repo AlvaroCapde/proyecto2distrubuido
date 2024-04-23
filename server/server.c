@@ -1,240 +1,244 @@
-/*
-
-   Lectura remota de una palabra para devolver el numero de vocales usando sockets pertenecientes
-   a la familia TCP, en modo conexion.
-   Codigo del servidor
-
-   Nombre Archivo: tcpserver.c
-   Archivos relacionados: num_vocales.h tcpclient.c 
-   Fecha: Febrero 2023
-
-   Compilacion: cc tcpserver.c -lnsl -o server
-   Ejecución: ./server
-*/
-
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
-#include <sys/types.h>
-#include <netdb.h>
-#include <signal.h>
+#include <string.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <stdbool.h>
 
-#define  DIRSIZE   2048      /* longitud maxima parametro entrada/salida */
-#define  PUERTO   5006		/* numero puerto arbitrario */
-#define  jsonSIZE  10000
-#define  msgSIZE   2048      /* longitud maxima parametro entrada/salida */
+#define PORT 8080
+#define BUFFER_SIZE 1024
+#define MAX_USERS 3
+#define MAX_USERNAME_LENGTH 20
+#define MAX_PASSWORD_LENGTH 20
+#define MAX_MESSAGE_LENGTH 30
 
-void initChat(int ,int );
+struct User {
+    char username[MAX_USERNAME_LENGTH];
+    char password[MAX_PASSWORD_LENGTH];
+};
 
-int                  sd, sd_actual;  /* descriptores de sockets */
-int                  addrlen;        /* longitud direcciones */
-struct sockaddr_in   sind, pin;      /* direcciones sockets cliente u servidor */
+struct User users[MAX_USERS] = {
+        {"Samuel", "123123"},
+        {"Capde", "123123"},
+        {"Sophia", "123123"}
+};
+FILE *chat = NULL;
 
-/*  procedimiento de aborte del servidor, si llega una senal SIGINT */
-/* ( <ctrl> <c> ) se cierra el socket y se aborta el programa       */
-void aborta_handler(int sig){
-   printf("....abortando el proceso servidor %d\n",sig);
-   close(sd);  
-   close(sd_actual); 
-   exit(1);
+void handle_client(int client_socket){
+    printf("Child process %d handling client %d\n\n",getpid(),client_socket);
+    char buffer[BUFFER_SIZE] = {0};
+    memset(buffer, 0, BUFFER_SIZE);
+    char response[BUFFER_SIZE];
+    strcpy(response, "INVALID SERVICE REQUEST");
+    int service_request;
+
+    while(1){
+        printf("\n------------------------------------------------------\n");
+        printf("Waiting for client service request...\n");
+        
+        // Receive client request
+        service_request = recv(client_socket, buffer, BUFFER_SIZE, 0);
+        if (service_request == -1) {
+            perror("Receive failed");
+            exit(EXIT_FAILURE);
+        }
+        buffer[BUFFER_SIZE - 1] = '\0'; // Ensure buffer is null-terminated
+        
+        printf("Received from client: %s\n", buffer);
+        
+        // Handle service type
+        char service_type = buffer[0];
+        char received_username[BUFFER_SIZE];
+        char received_password[BUFFER_SIZE];
+        char dummy[BUFFER_SIZE];
+        char message[BUFFER_SIZE];
+        char username[BUFFER_SIZE];
+        
+        printf("Service type: %c", service_type);
+        switch (service_type) {
+                
+            case '1': // Hello World
+                printf("\nStarting service 1\n");
+                
+                strcpy(response, "Hello from server");
+                
+                printf("Ending service 1\n");
+                break;
+                
+            case '2': // Authentication
+                printf("\nStarting service 2\n");
+                
+                sscanf(buffer, "%s\n%s\n%s", dummy, received_username, received_password);
+                printf("%s\n",received_username);
+                printf("%s\n",received_password);
+                
+                strcpy(response, "Auth Failed");
+                // Verify credentials
+                for (int i = 0; i < MAX_USERS; i++) {
+                    if (strcmp(received_username, users[i].username) == 0){
+                        if(strcmp(received_password, users[i].password) == 0){
+                            strcpy(response, "Auth Success");
+                            strcpy(username, users[i].username);
+                            printf("Auth Success!");
+                        }
+                    }
+                }
+                
+                printf("Ending service 2\n");
+                break;
+                
+            case '3': // Send message (client to server)
+                printf("\nStarting service 3\n");
+                //sscanf(buffer, "%s\n%s", dummy, message);
+                sscanf(buffer, "%c\n%[^\n]s", dummy, message);
+                fflush(stdout);
+                //writes message into txt
+                if (chat == NULL) {
+                    chat = fopen("chat.txt", "a+");
+                    if (chat == NULL) {
+                        perror("Failed to open file");
+                        exit(EXIT_FAILURE);
+                    }
+                }
+                printf("Message to write: %s: %s\n", username, message);
+                fprintf(chat, "%s: %s\n", username, message);
+                fflush(chat);
+                
+                strcpy(response, "Message Received");
+                
+                printf("\nEnding service 3\n");
+                
+                FILE *chat = fopen("chat.txt", "r");
+                    if (chat == NULL) {
+                        perror("Failed to open file");
+                        exit(EXIT_FAILURE);
+                    }
+
+                    char line[256]; // Assuming maximum length of a line
+                    printf("\nChat Contents:\n");
+                    while (fgets(line, sizeof(line), chat)) {
+                        printf("%s", line);
+                    }
+
+                    fclose(chat);
+                
+                
+                break;
+            
+            case '4': // Send chat contents to client
+                printf("\nStarting service 4\n");
+
+                FILE *chat_file = fopen("chat.txt", "r");
+                if (chat_file == NULL) {
+                    perror("Failed to open file");
+                    strcpy(response, "Failed to open chat file");
+                } else {
+                    char line[BUFFER_SIZE];
+                    strcpy(response, ""); // Clear previous response
+                    // Read each line and append to the response
+                    while (fgets(line, sizeof(line), chat_file)) {
+                        strcat(response, line);
+                    }
+                    fclose(chat_file);
+                }
+
+                printf("Chat contents sent to client.\n");
+                break;
+
+                
+            default:
+                break;
+        }
+        // Send response to client
+        if (send(client_socket, response, strlen(response), 0) == -1) {
+            perror("Send failed");
+            exit(EXIT_FAILURE);
+        }
+        
+        //Clear buffer
+        memset(buffer, 0, BUFFER_SIZE);
+        printf("\n------------------------------------------------------\n");
+    }
+
+    
+    
 }
 
+int main() {
+    int server_socket;
+    int client_socket;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+    pid_t child_pid;
 
-int main(){
+    // Create socket
+    if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
 
-	int client1,client2;
-	char usernameOne[] = "user1";
-	char passwordOne[] = "password1";
-	char usernameTwo[] = "user2";
-	char passwordTwo[] = "password2";
+    // Initialize server address structure
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(PORT);
 
-	
-	int clientsLimit = 2; // Limite de clientes que acepta el servidor.
-	int contClients = 0;  // Clientes conectados al momento.
-	pid_t child_pid;
-	
-	int playerOneFlag = 0;
-	int playerTwoFlag = 0;
+    // Bind socket to address
+    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+        perror("Bind failed");
+        exit(EXIT_FAILURE);
+    }
 
-	int mainProcess = getpid(); //ID del proceso principal.
-	char  msg[msgSIZE];	     /* parametro entrada y salida */
+    // Listen for connections
+    if (listen(server_socket, 6) == -1) {
+        perror("Listen failed");
+        exit(EXIT_FAILURE);
+    }
 
-	/*
-	When the user presses <Ctrl + C>, the aborta_handler function will be called, 
-	and such a message will be printed. 
-	Note that the signal function returns SIG_ERR if it is unable to set the 
-	signal handler, executing line 54.
-	*/	
-   if(signal(SIGINT, aborta_handler) == SIG_ERR){
-   	perror("Could not set signal handler");
-      return 1;
-   }
-       //signal(SIGINT, aborta);      /* activando la senal SIGINT */
+    printf("Server listening on port %d...\n", PORT);
+    
+    FILE *chat = fopen("chat.txt", "w"); // Open file in write mode, truncating existing content
+        if (chat == NULL) {
+            perror("Failed to open file");
+            exit(EXIT_FAILURE);
+        }
 
-/* obtencion de un socket tipo internet */
-	if ((sd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-		perror("[-] Could not create socket\n");
-		exit(1);
-	}
+        fclose(chat);
 
-/* asignar direcciones en la estructura de direcciones */
-	sind.sin_family = AF_INET;
-	sind.sin_addr.s_addr = INADDR_ANY;   /* INADDR_ANY=0x000000 = yo mismo */
-	sind.sin_port = htons(PUERTO);       /*  convirtiendo a formato red */
+    // Accept incoming connections
+    while (1) {
+        client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len);
+        if (client_socket == -1) {
+            perror("Accept failed");
+            exit(EXIT_FAILURE);
+        }
 
-/* asociando el socket al numero de puerto */
-	if (bind(sd, (struct sockaddr *)&sind, sizeof(sind)) == -1) {
-		perror("bind");
-		exit(1);
-	}
-			
+        printf("Connection accepted from %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+        
+        // Fork a new process to handle the client
+        if ((child_pid = fork()) == -1) {
+            perror("Fork failed");
+            exit(EXIT_FAILURE);
+        } else if (child_pid == 0) {
+            // Child process
+            close(server_socket); // Close server socket in child process
+            handle_client(client_socket); // Handle client request
+            exit(EXIT_SUCCESS);
+        } else {
+            // Parent process
+            close(client_socket); // Close client socket in parent process
+            printf("\n-------------------------------------------------------------\n");
+            printf("Parent process continuing to listen for another client...\n");
+            printf("-------------------------------------------------------------\n\n");
+        }
+    }
 
-/* ponerse a escuchar a traves del socket */
-	if (listen(sd, 6) != 0) {
-		perror("[-]Error in binding.\n");
-		exit(1);
-	}else{
-		printf("[+]Listening...\n");
-	}
+    // Close server socket
+    close(server_socket);
 
-	
-/* esperando que un cliente solicite un servicio */
-
-
-	while(1){
-	 	client1 = accept(sd, (struct sockaddr *)&pin,&addrlen);
-	 	printf("User 1 joined ...\n");
-	 	client2 = accept(sd, (struct sockaddr *)&pin,&addrlen);
-	 	printf("User 2 joined ...\n");
-		if(fork()==0)
-			initChat(client1, client2);
-	 }
-
-	close(sd_actual);  
-   	close(sd);
-   	printf("Conexion cerrada\n");
-	return 0;
-}
-
-
-void initChat(int client1, int client2){
-	char  msg[msgSIZE];	     /* parametro entrada y salida */
-
-	char usernameOne[] = "cliente1";
-	char passwordOne[] = "contra1";
-	
-	char usernameTwo[] = "cliente2";
-	char passwordTwo[] = "contra2";
-
-	char delimiter[] = " ";
-	char userReceived[msgSIZE];
-	char passwordReceived[msgSIZE];
-	char sendAuth[msgSIZE];
-	char initChat[] = "1";
-	int authFlagOne = 0;
-	int authFlagTwo = 0;
-	int userOneFlag = 0;
-	int userTwoFlag = 0;
-
-	int turn = 1;
-
-
-	if (send(client1, "Usuario 2 ingreso.", 18, 0) == -1) {
-		perror("send");
-		exit(1);
-	}
-	if (send(client2, "Usuario 1 ya ha ingresado.", 26, 0) == -1) {
-		perror("send");
-		exit(1);
-	}
-
-	while(!authFlagOne){
-		if (recv(client1, msg, sizeof(msg), 0) == -1){
-				perror("recv");
-				exit(1);
-		}
-		char *ptr = strtok(msg, delimiter);
-
-		if(ptr != NULL){
-			strcpy(userReceived, ptr);
-			ptr = strtok(NULL, delimiter);
-			strcpy(passwordReceived, ptr);
-		}
-
-		if(!strcmp(usernameOne, userReceived) && !strcmp(passwordOne, passwordReceived)){
-			strcpy(sendAuth, "1");
-			if (send(client1, sendAuth, strlen(sendAuth), 0) == -1) {
-				perror("send");
-				exit(1);
-			}
-			printf("Usuario uno autenticado. \n");
-			authFlagOne = 1;
-			userOneFlag = 1;
-
-		}else if(!strcmp(usernameTwo, userReceived) && !strcmp(passwordTwo, passwordReceived)){
-			strcpy(sendAuth, "1");
-			if (send(client1, sendAuth, strlen(sendAuth), 0) == -1) {
-				perror("send");
-				exit(1);
-			}
-			printf("Usuario uno autenticado. \n");
-			authFlagOne = 1;
-			userOneFlag = 1;
-
-		}else{
-			strcpy(sendAuth, "0");
-			printf("Cliente ingreso datos incorrectos.\n");
-			if (send(client1, sendAuth, strlen(sendAuth), 0) == -1) {
-				perror("send");
-				exit(1);
-			}
-		}
-
-	}
-	
-	while(!authFlagTwo){
-		if (recv(client2, msg, sizeof(msg), 0) == -1){
-				perror("recv");
-				exit(1);
-		}
-		char *ptr = strtok(msg, delimiter);
-
-		if(ptr != NULL){
-			strcpy(userReceived, ptr);
-			ptr = strtok(NULL, delimiter);
-			strcpy(passwordReceived, ptr);
-		}
-
-		if(!strcmp(usernameOne, userReceived) && !strcmp(passwordOne, passwordReceived)){
-			strcpy(sendAuth, "1");
-			if (send(client2, sendAuth, strlen(sendAuth), 0) == -1) {
-				perror("send");
-				exit(1);
-			}
-			printf("Usuario dos autenticado. \n");
-			authFlagTwo = 1;
-			playerTwoFlag = 1;
-
-		}else if(!strcmp(usernameTwo, userReceived) && !strcmp(passwordTwo, passwordReceived)){
-			strcpy(sendAuth, "1");
-			if (send(client2, sendAuth, strlen(sendAuth), 0) == -1) {
-				perror("send");
-				exit(1);
-			}
-			printf("Usuario dos autenticado. \n");
-			authFlagTwo = 1;
-			userTwoFlag = 1;
-
-		}else{
-			strcpy(sendAuth, "0");
-			printf("Cliente ingreso datos incorrectos.\n");
-			if (send(client2, sendAuth, strlen(sendAuth), 0) == -1) {
-				perror("send");
-				exit(1);
-			}
-		}
-
-	}
+    
+    return 0;
 }
 
